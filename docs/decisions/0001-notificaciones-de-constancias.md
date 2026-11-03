@@ -44,6 +44,7 @@ Opción elegida: **"Alternativa B. Procesamiento asíncrono mediante eventos per
 * Malo, porque se agrega un componente adicional que desplegar, monitorear y mantener.
 * Malo, porque la notificación ya no es inmediata: llega después del siguiente ciclo de procesamiento.
 * Riesgo: si el procesador envía el correo y falla antes de marcar el registro como enviado, podría reenviarlo. La restricción de unicidad evita duplicar la solicitud, pero no cubre este caso; se mitiga marcando el estado de forma atómica con bloqueo del registro y, si el proveedor lo permite, enviando un identificador de idempotencia. Si no lo permite, este riesgo residual queda documentado y aceptado.
+* Riesgo (Revisión 1): la forma en que el procesador interpreta los errores del proveedor (reintentable o definitivo) depende del formato de errores del proveedor; un cambio en ese formato puede provocar reintentos indebidos o abandonar envíos que sí eran recuperables.
 * Trade-off: se acepta mayor complejidad operativa y algo de latencia a cambio de continuidad, trazabilidad y un único punto de control de pendientes y duplicados.
 
 ### Confirmation
@@ -55,6 +56,7 @@ Pruebas y revisiones que podrían realizarse en una implementación futura (no s
 3. **Duplicados (RT4):** intentar crear dos solicitudes para la misma constancia y verificar que la segunda es rechazada por la restricción de unicidad.
 4. **Doble procesamiento:** ejecutar dos instancias del procesador sobre el mismo registro y verificar que solo una lo envía.
 5. **Revisión de diseño:** verificar que ningún código del flujo de generación invoque al proveedor directamente.
+6. **Pruebas de contrato del proveedor (agregada en la Revisión 1):** con respuestas de error simuladas en el formato nuevo y en el anterior, verificar que el procesador las clasifica correctamente como reintentables o definitivas, que un error desconocido se trata como reintentable con límite de intentos y que ninguna clasificación genera una segunda solicitud para la misma constancia.
 
 ## Pros and Cons of the Options
 
@@ -77,3 +79,13 @@ Pruebas y revisiones que podrían realizarse en una implementación futura (no s
 ## More Information
 
 Este ADR documenta únicamente la decisión sobre la comunicación con el servicio de notificaciones, no toda la arquitectura de ConstanciaUV. Es una propuesta académica (`proposed`) y no una decisión institucional aprobada.
+
+### Revisión 1. Cambio en el proveedor de notificaciones
+
+**Cambio recibido.** El proveedor externo modificó su interfaz de comunicación y cambió la forma en que reporta los errores de envío. No se dispone de resultados de pruebas ni de mediciones: este registro es un análisis de impacto, no un resultado de ejecución.
+
+**Impacto sobre la alternativa seleccionada.** El cambio afecta principalmente al componente independiente que se comunica con el proveedor, en concreto a dos puntos: la construcción de las solicitudes de envío y la interpretación de los errores para decidir si un envío se reintenta o se marca como fallido. No afecta a la generación ni al almacenamiento de constancias (RT2), porque ese flujo no invoca al proveedor, ni al registro de notificaciones pendientes y su restricción de unicidad por constancia (RT3, RT4), que son propios de ConstanciaUV. La Alternativa B permite localizar el cambio en un solo componente; en la Alternativa A habría afectado además al flujo de generación, que habría tenido que interpretar los errores del proveedor.
+
+**Decisión.** La decisión se mantiene como propuesta (`proposed`) y su justificación original no cambia: las razones basadas en RT2, RT3 y RT4 siguen vigentes. La nueva información no contradice esas razones, sino que confirma que el aislamiento del proveedor es valioso. Lo que sí requiere evaluación posterior es la política de clasificación de errores: antes de implementar, habría que revisar la documentación del nuevo formato para definir qué errores son reintentables y cuáles definitivos.
+
+**Consecuencia y comprobación a actualizar.** Se agregó a Consequences el riesgo de clasificación incorrecta de errores, y a Confirmation la comprobación 6 (pruebas de contrato con el formato nuevo y el anterior). Esa comprobación incluye verificar que un error desconocido se trate como reintentable con límite de intentos y que el cambio no abra una vía para duplicar solicitudes.
